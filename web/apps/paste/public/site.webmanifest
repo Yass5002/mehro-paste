@@ -1,0 +1,23 @@
+{
+    "name": "mehro paste",
+    "short_name": "mehro paste",
+    "description": "Fast, end-to-end encrypted paste sharing with burn-on-read & auto-expiry.",
+    "start_url": "/",
+    "scope": "/",
+    "id": "/",
+    "icons": [
+        {
+            "src": "/android-chrome-192x192.png",
+            "sizes": "192x192",
+            "type": "image/png"
+        },
+        {
+            "src": "/android-chrome-512x512.png",
+            "sizes": "512x512",
+            "type": "image/png"
+        }
+    ],
+    "theme_color": "#0d1016",
+    "background_color": "#0d1016",
+    "display": "standalone"
+}

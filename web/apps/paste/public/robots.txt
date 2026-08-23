@@ -1,0 +1,7 @@
+# https://www.robotstxt.org/robotstxt.html
+User-agent: *
+Allow: /
+Disallow: /api/
+
+Host: paste.mehro.me
+Sitemap: https://paste.mehro.me/sitemap.xml

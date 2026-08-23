@@ -1,0 +1,56 @@
+{
+    "name": "mehro-paste",
+    "version": "1.0.0",
+    "description": "Fast, end-to-end encrypted paste sharing with burn-on-read & auto-expiry.",
+    "license": "AGPL-3.0",
+    "private": true,
+    "homepage": "https://paste.mehro.me",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/Yass5002/mehro-paste.git"
+    },
+    "bugs": {
+        "url": "https://github.com/Yass5002/mehro-paste/issues"
+    },
+    "author": "Yassine (https://github.com/Yass5002)",
+    "keywords": [
+        "paste",
+        "encrypted-paste",
+        "zero-knowledge",
+        "libsodium",
+        "e2ee",
+        "burn-on-read",
+        "ephemeral-notes",
+        "nextjs",
+        "react",
+        "redis"
+    ],
+    "workspaces": [
+        "apps/paste",
+        "packages/base",
+        "packages/build-config"
+    ],
+    "scripts": {
+        "dev": "npm exec --workspace paste -- next dev --webpack -p 3008",
+        "dev:paste": "npm exec --workspace paste -- next dev --webpack -p 3008",
+        "build": "NODE_OPTIONS='--max-old-space-size=2048' npm exec --workspace paste -- next build --webpack",
+        "build:paste": "NODE_OPTIONS='--max-old-space-size=2048' npm exec --workspace paste -- next build --webpack",
+        "start": "npm exec --workspace paste -- next start -p 3008",
+        "start:paste": "npm exec --workspace paste -- next start -p 3008",
+        "lint": "eslint apps packages",
+        "lint:fix": "eslint apps packages --fix",
+        "typecheck": "tsc --noEmit"
+    },
+    "overrides": {
+        "@types/react": "19.2.17",
+        "@types/react-dom": "19.2.3",
+        "base-x": "5.0.1"
+    },
+    "devDependencies": {
+        "concurrently": "10.0.4",
+        "eslint": "10.4.1",
+        "prettier": "3.8.3",
+        "typescript": "6.0.3"
+    },
+    "packageManager": "npm@11.12.1"
+}

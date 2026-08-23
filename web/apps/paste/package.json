@@ -1,0 +1,37 @@
+{
+    "name": "paste",
+    "version": "1.0.0",
+    "description": "Web application for mehro-paste — fast, client-side encrypted paste sharing.",
+    "license": "AGPL-3.0",
+    "private": true,
+    "homepage": "https://paste.mehro.me",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/Yass5002/mehro-paste.git",
+        "directory": "web/apps/paste"
+    },
+    "bugs": {
+        "url": "https://github.com/Yass5002/mehro-paste/issues"
+    },
+    "scripts": {
+        "dev": "next dev --webpack",
+        "build": "next build --webpack",
+        "start": "next start",
+        "build:post": "echo Built successfully"
+    },
+    "dependencies": {
+        "@fontsource/gochi-hand": "5.2.8",
+        "@hugeicons/core-free-icons": "1.2.1",
+        "@hugeicons/react": "1.1.6",
+        "cookie": "2.0.1",
+        "ioredis": "6.0.0",
+        "jose": "6.2.8",
+        "mehro-base": "*",
+        "nanoid": "6.0.1",
+        "qr-code-styling": "1.9.2"
+    },
+    "devDependencies": {
+        "@types/cookie": "0.6.0",
+        "mehro-build-config": "*"
+    }
+}

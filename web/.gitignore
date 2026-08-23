@@ -1,0 +1,18 @@
+# Environment variables & local secrets
+.env
+.env.local
+.env.*.local
+
+# TypeScript
+*.tsbuildinfo
+next-env.d.ts
+
+# Build outputs
+dist/
+.next/
+.next-dev/
+.next-desktop/
+out/
+
+# Dependencies
+node_modules/

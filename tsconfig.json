@@ -1,0 +1,25 @@
+{
+    "compilerOptions": {
+        "target": "ES2020",
+        "lib": ["ESnext", "DOM", "DOM.Iterable", "WebWorker"],
+        "module": "ESNext",
+        "moduleResolution": "bundler",
+        "jsx": "preserve",
+        "isolatedModules": true,
+        "esModuleInterop": true,
+        "skipLibCheck": true,
+        "strict": true,
+        "paths": {
+            "@/*": ["./web/apps/paste/src/*"],
+            "mehro-base": ["./web/packages/base"],
+            "mehro-base/*": ["./web/packages/base/*"],
+            "mehro-build-config": ["./web/packages/build-config"],
+            "mehro-build-config/*": ["./web/packages/build-config/*"]
+        }
+    },
+    "include": [
+        "web/apps/paste/src/**/*",
+        "web/apps/paste/next-env.d.ts",
+        "web/packages/base/**/*"
+    ]
+}
