@@ -1,0 +1,72 @@
+name: Test, build & deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    # 22.04 (glibc 2.35) so prebuilt native modules run on the Debian 12 VPS.
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install redis-server (integration tests)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq redis-server
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Package release
+        run: |
+          npm prune --omit=dev --no-audit --no-fund
+          tar czf "$RUNNER_TEMP/release.tgz" --exclude=./apps/paste/.next/cache .
+          ls -lh "$RUNNER_TEMP/release.tgz"
+
+      - name: Configure SSH
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key && chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+
+      - name: Upload and deploy
+        working-directory: .
+        env:
+          TARGET: ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}
+        run: |
+          SSH="ssh -i ~/.ssh/deploy_key -o BatchMode=yes"
+          scp -i ~/.ssh/deploy_key -o BatchMode=yes "$RUNNER_TEMP/release.tgz" "$TARGET:mehro-paste-release.tgz"
+          scp -i ~/.ssh/deploy_key -o BatchMode=yes scripts/deploy-remote.sh "$TARGET:mehro-paste-deploy.sh"
+          $SSH "$TARGET" "bash ~/mehro-paste-deploy.sh $GITHUB_SHA"
+
+      - name: Verify live site
+        working-directory: .
+        run: |
+          sleep 3
+          curl -fsS https://paste.mehro.me/ -o page.html
+          grep -q 'data-exclude-hash="true"' page.html
+          echo "paste.mehro.me is live with commit $GITHUB_SHA"
