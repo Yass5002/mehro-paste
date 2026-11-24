@@ -18,17 +18,8 @@ import {
     type ParsedArrow,
     type ParsedArrowPath,
 } from "../utils/lottie";
+import { formatTtlDuration } from "../utils/formatTtl";
 import { PasteQrCode } from "./PasteQrCode";
-
-const formatTtlDuration = (seconds?: number) => {
-    if (!seconds) return "24 hours";
-    if (seconds <= 300) return "5 mins";
-    if (seconds <= 3600) return "1 hr";
-    if (seconds <= 86400) return "24 hrs";
-    if (seconds <= 259200) return "3 days";
-    if (seconds <= 604800) return "1 week";
-    return `${Math.round(seconds / 86400)} days`;
-};
 
 interface PasteLinkCardProps {
     link: string;

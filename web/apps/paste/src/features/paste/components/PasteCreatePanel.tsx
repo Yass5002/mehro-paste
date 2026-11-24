@@ -32,6 +32,7 @@ import { downloadPasteQrCode } from "./qrCode";
 import { pasteTextFieldSx } from "./textFieldSx";
 
 const TTL_OPTIONS = [
+    { label: "1 minute", value: 60 },
     { label: "5 minutes", value: 300 },
     { label: "1 hour", value: 3600 },
     { label: "1 day", value: 86400 },
