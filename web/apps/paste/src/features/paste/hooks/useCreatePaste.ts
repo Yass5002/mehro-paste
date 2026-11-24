@@ -1,3 +1,4 @@
+import { encryptedPasteLength, MAX_CIPHERTEXT_LENGTH } from "@/lib/pasteLimits";
 import { createPaste } from "@/services/paste";
 import { useState } from "react";
 import { MAX_PASTE_CHARS } from "../constants";
@@ -32,6 +33,15 @@ export const useCreatePaste = () => {
 
         if (inputText.length > MAX_PASTE_CHARS) {
             setCreateError(`Paste is limited to ${MAX_PASTE_CHARS} characters`);
+            return;
+        }
+
+        // Non-Latin text and emoji take 2–4 bytes per character, so a paste
+        // within the character limit can still exceed the server's size cap.
+        if (encryptedPasteLength(inputText) > MAX_CIPHERTEXT_LENGTH) {
+            setCreateError(
+                "Paste is too large once encrypted. Non-Latin text and emoji take more space; try splitting it into smaller pastes.",
+            );
             return;
         }
 

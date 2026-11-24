@@ -1,4 +1,5 @@
-import type { PastePayload } from "@/services/paste";
+import { isValidKdfParams } from "@/lib/pasteLimits";
+import type { PasteKeyEnvelope, PastePayload } from "@/services/paste";
 import {
     decryptBox,
     decryptMetadataJSON,
@@ -25,6 +26,14 @@ export interface PasteKey {
 export class IncorrectPastePasswordError extends Error {
     constructor() {
         super("Incorrect paste password");
+    }
+}
+
+export class InvalidLinkKeyError extends Error {
+    constructor() {
+        super(
+            "The key in this link is wrong. Make sure you copied the whole link.",
+        );
     }
 }
 
@@ -87,11 +96,17 @@ const pasteKeyKdfSecret = (pasteKey: PasteKey, password?: string) => {
     return `${PASSWORD_KDF_CONTEXT}\n${pasteKey.fragmentSecret}\n${password}`;
 };
 
-const resolvePasteKey = async (
+export const resolvePasteKey = async (
     pasteKey: PasteKey,
-    payload: PastePayload,
+    payload: PasteKeyEnvelope,
     password?: string,
 ) => {
+    // Never hand server-supplied Argon2 limits to WASM unchecked: a huge
+    // memLimit would freeze or crash the tab.
+    if (!isValidKdfParams(payload.kdfOpsLimit, payload.kdfMemLimit)) {
+        throw new Error("Invalid KDF parameters");
+    }
+
     const keyEncryptionKey = await deriveKey(
         pasteKeyKdfSecret(pasteKey, password),
         payload.kdfNonce,
@@ -107,11 +122,11 @@ const resolvePasteKey = async (
             },
             keyEncryptionKey,
         );
-    } catch (error) {
+    } catch {
         if (pasteKey.passwordRequired) {
             throw new IncorrectPastePasswordError();
         }
-        throw error;
+        throw new InvalidLinkKeyError();
     }
 };
 
@@ -119,8 +134,10 @@ export const decryptConsumedPaste = async (
     pasteKey: PasteKey,
     payload: PastePayload,
     password?: string,
+    preResolvedKey?: string,
 ) => {
-    const key = await resolvePasteKey(pasteKey, payload, password);
+    const key =
+        preResolvedKey ?? (await resolvePasteKey(pasteKey, payload, password));
     const decrypted = (await decryptMetadataJSON(
         {
             encryptedData: payload.encryptedData,
