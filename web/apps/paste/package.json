@@ -17,7 +17,9 @@
         "dev": "next dev --webpack",
         "build": "next build --webpack",
         "start": "next start",
-        "build:post": "echo Built successfully"
+        "build:post": "echo Built successfully",
+        "test": "vitest run",
+        "test:watch": "vitest"
     },
     "dependencies": {
         "@fontsource/gochi-hand": "5.2.8",
@@ -31,7 +33,12 @@
         "qr-code-styling": "1.9.2"
     },
     "devDependencies": {
+        "@testing-library/dom": "10.4.2",
+        "@testing-library/react": "16.3.3",
         "@types/cookie": "0.6.0",
-        "mehro-build-config": "*"
+        "jsdom": "30.1.3",
+        "mehro-build-config": "*",
+        "vite": "8.3.6",
+        "vitest": "5.1.0"
     }
 }

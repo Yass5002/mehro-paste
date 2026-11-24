@@ -39,7 +39,8 @@
         "start:paste": "npm exec --workspace paste -- next start -p 3008",
         "lint": "eslint apps packages",
         "lint:fix": "eslint apps packages --fix",
-        "typecheck": "tsc --noEmit"
+        "typecheck": "tsc --noEmit",
+        "test": "npm run test --workspace paste"
     },
     "overrides": {
         "@types/react": "19.2.17",

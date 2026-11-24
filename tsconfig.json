@@ -19,6 +19,7 @@
     },
     "include": [
         "web/apps/paste/src/**/*",
+        "web/apps/paste/tests/**/*",
         "web/apps/paste/next-env.d.ts",
         "web/packages/base/**/*"
     ]
