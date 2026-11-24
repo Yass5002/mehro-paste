@@ -1,5 +1,15 @@
 import type { NextApiRequest, NextApiResponse } from "next";
-import { redis, PASTE_KEY_PREFIX, DEFAULT_PASTE_TTL_SECONDS } from "@/lib/redis";
+import { DEFAULT_PASTE_TTL_SECONDS } from "@/lib/redis";
+import {
+    ACCESS_TOKEN_ALPHABET,
+    ACCESS_TOKEN_LENGTH,
+    MAX_CIPHERTEXT_LENGTH,
+    MAX_METADATA_FIELD_LENGTH,
+    MAX_TTL_SECONDS,
+    MIN_TTL_SECONDS,
+    isValidKdfParams,
+} from "@/lib/pasteLimits";
+import { storePasteIfAbsent } from "@/lib/pasteStore";
 import { customAlphabet } from "nanoid";
 
 export const config = {
@@ -10,10 +20,15 @@ export const config = {
     },
 };
 
-const generateAccessToken = customAlphabet("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ", 10);
-const MAX_CIPHERTEXT_BYTES = 4_500_000; // ~4.5 MB to cover Pi limit (3.14M chars encrypted)
-const MIN_TTL_SECONDS = 60; // 1 min
-const MAX_TTL_SECONDS = 604_800; // 1 week
+const generateAccessToken = customAlphabet(
+    ACCESS_TOKEN_ALPHABET,
+    ACCESS_TOKEN_LENGTH,
+);
+const MAX_TOKEN_RETRIES = 3;
+
+function isValidStringField(value: unknown, maxLength: number): value is string {
+    return typeof value === "string" && value.length > 0 && value.length <= maxLength;
+}
 
 export interface CreatePasteRequest {
     encryptedData: string;
@@ -36,66 +51,65 @@ export default async function handler(
         return;
     }
 
-    const body = req.body as CreatePasteRequest | undefined;
+    const body = (
+        req.body && typeof req.body === "object" && !Array.isArray(req.body)
+            ? req.body
+            : undefined
+    ) as CreatePasteRequest | undefined;
     if (
-        !body?.encryptedData ||
-        !body.decryptionHeader ||
-        !body.encryptedPasteKey ||
-        !body.encryptedPasteKeyNonce ||
-        !body.kdfNonce ||
-        typeof body.kdfMemLimit !== "number" ||
-        typeof body.kdfOpsLimit !== "number"
+        !body ||
+        typeof body.encryptedData !== "string" ||
+        body.encryptedData.length === 0 ||
+        !isValidStringField(body.decryptionHeader, MAX_METADATA_FIELD_LENGTH) ||
+        !isValidStringField(body.encryptedPasteKey, MAX_METADATA_FIELD_LENGTH) ||
+        !isValidStringField(body.encryptedPasteKeyNonce, MAX_METADATA_FIELD_LENGTH) ||
+        !isValidStringField(body.kdfNonce, MAX_METADATA_FIELD_LENGTH) ||
+        !isValidKdfParams(body.kdfOpsLimit, body.kdfMemLimit)
     ) {
         res.status(400).json({ message: "Invalid paste payload" });
         return;
     }
 
-    if (body.encryptedData.length > MAX_CIPHERTEXT_BYTES) {
+    if (body.encryptedData.length > MAX_CIPHERTEXT_LENGTH) {
         res.status(400).json({ message: "Ciphertext exceeds max allowed length" });
         return;
     }
 
     let ttlSeconds = DEFAULT_PASTE_TTL_SECONDS;
-    if (typeof body.ttlSeconds === "number" && !Number.isNaN(body.ttlSeconds)) {
-        ttlSeconds = Math.max(MIN_TTL_SECONDS, Math.min(MAX_TTL_SECONDS, body.ttlSeconds));
+    if (typeof body.ttlSeconds === "number" && Number.isFinite(body.ttlSeconds)) {
+        const flooredTtl = Math.floor(body.ttlSeconds);
+        ttlSeconds = Math.max(MIN_TTL_SECONDS, Math.min(MAX_TTL_SECONDS, flooredTtl));
     }
 
     const burnOnRead = body.burnOnRead !== false; // Default true (Burn-on-Read)
 
     const now = Date.now();
     const expiresAt = now + ttlSeconds * 1000;
-    const accessToken = generateAccessToken();
-    const redisKey = `${PASTE_KEY_PREFIX}${accessToken}`;
+    const paste = {
+        encryptedData: body.encryptedData,
+        decryptionHeader: body.decryptionHeader,
+        encryptedPasteKey: body.encryptedPasteKey,
+        encryptedPasteKeyNonce: body.encryptedPasteKeyNonce,
+        kdfNonce: body.kdfNonce,
+        kdfMemLimit: body.kdfMemLimit,
+        kdfOpsLimit: body.kdfOpsLimit,
+        burnOnRead,
+        createdAt: now,
+        expiresAt,
+    };
 
     try {
-        const payloadToStore = {
-            encryptedData: body.encryptedData,
-            decryptionHeader: body.decryptionHeader,
-            encryptedPasteKey: body.encryptedPasteKey,
-            encryptedPasteKeyNonce: body.encryptedPasteKeyNonce,
-            kdfNonce: body.kdfNonce,
-            kdfMemLimit: body.kdfMemLimit,
-            kdfOpsLimit: body.kdfOpsLimit,
-            burnOnRead,
-            createdAt: now,
-            expiresAt,
-        };
-
-        // Redis SET with EX (TTL in seconds). Auto-expires natively!
-        await redis.set(
-            redisKey,
-            JSON.stringify(payloadToStore),
-            "EX",
-            ttlSeconds,
-        );
-
-        res.status(200).json({
-            accessToken,
-            expiresAt: expiresAt * 1000, // Microseconds format for frontend
-        });
+        for (let attempt = 0; attempt < MAX_TOKEN_RETRIES; attempt++) {
+            const accessToken = generateAccessToken();
+            // Never overwrite an existing paste on a token collision; retry instead.
+            if (await storePasteIfAbsent(accessToken, paste, ttlSeconds)) {
+                res.status(200).json({ accessToken, expiresAt });
+                return;
+            }
+        }
+        throw new Error("Failed to allocate unique paste access token");
     } catch (err) {
         console.error("Failed to store paste in Redis:", err);
         res.status(500).json({ message: "Failed to store paste in database" });
     }
 }
-

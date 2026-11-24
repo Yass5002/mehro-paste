@@ -1,11 +1,11 @@
 import type { NextApiRequest, NextApiResponse } from "next";
-import { redis, PASTE_KEY_PREFIX } from "@/lib/redis";
 import {
+    buildGuardCookieHeader,
     isLikelyPreviewRequest,
     signGuardJWT,
-    GUARD_COOKIE_NAME,
-    GUARD_TTL_SECONDS,
 } from "@/lib/guard";
+import { ACCESS_TOKEN_PATTERN } from "@/lib/pasteLimits";
+import { CorruptPasteError, peekPasteEnvelope, type PasteEnvelope } from "@/lib/pasteStore";
 
 export default async function handler(
     req: NextApiRequest,
@@ -17,35 +17,37 @@ export default async function handler(
     }
 
     const body = (req.body && typeof req.body === "object" ? req.body : {}) as { accessToken?: unknown };
-    const accessToken = typeof body.accessToken === "string" ? body.accessToken : undefined;
-    if (!accessToken) {
+    const accessToken = typeof body.accessToken === "string" ? body.accessToken.trim() : "";
+    if (!ACCESS_TOKEN_PATTERN.test(accessToken)) {
         res.status(400).json({ message: "Invalid paste token" });
         return;
     }
 
-    // Rule: js-early-exit & Link preview bot defense
+    // Link preview bot defense
     if (isLikelyPreviewRequest(req)) {
         res.status(410).json({ message: "Preview request blocked" });
         return;
     }
 
-    const tokenStr = accessToken.trim();
-    const redisKey = `${PASTE_KEY_PREFIX}${tokenStr}`;
+    let envelope: PasteEnvelope | null;
+    try {
+        envelope = await peekPasteEnvelope(accessToken);
+    } catch (err) {
+        if (err instanceof CorruptPasteError) {
+            res.status(500).json({ message: "Failed to parse paste envelope" });
+            return;
+        }
+        console.error("Failed to check paste existence in Redis:", err);
+        res.status(500).json({ message: "Failed to verify paste availability" });
+        return;
+    }
 
-    const exists = await redis.exists(redisKey);
-    if (!exists) {
+    if (!envelope) {
         res.status(410).json({ message: "Paste unavailable" });
         return;
     }
 
-    const guardToken = await signGuardJWT(tokenStr, req.headers["user-agent"]);
-
-    const isSecure =
-        req.headers["x-forwarded-proto"] === "https" ||
-        req.headers.origin?.startsWith("https://");
-
-    const cookieHeader = `${GUARD_COOKIE_NAME}=${guardToken}; Path=/; Max-Age=${GUARD_TTL_SECONDS}; HttpOnly; SameSite=Strict${isSecure ? "; Secure" : ""}`;
-
-    res.setHeader("Set-Cookie", cookieHeader);
-    res.status(200).json({ status: "ok" });
+    const guardToken = await signGuardJWT(accessToken, req);
+    res.setHeader("Set-Cookie", buildGuardCookieHeader(req, guardToken));
+    res.status(200).json({ status: "ok", envelope });
 }

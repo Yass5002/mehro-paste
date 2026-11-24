@@ -1,21 +1,16 @@
 import type { NextApiRequest, NextApiResponse } from "next";
-import { redis, PASTE_KEY_PREFIX } from "@/lib/redis";
+import { redis } from "@/lib/redis";
 import {
+    buildClearGuardCookieHeader,
     isLikelyPreviewRequest,
     verifyGuardJWT,
     GUARD_COOKIE_NAME,
+    GUARD_JTI_PREFIX,
+    GUARD_REJECTED_CODE,
+    GUARD_TTL_SECONDS,
 } from "@/lib/guard";
-
-interface StoredPasteRecord {
-    encryptedData: string;
-    decryptionHeader: string;
-    encryptedPasteKey: string;
-    encryptedPasteKeyNonce: string;
-    kdfNonce: string;
-    kdfMemLimit: number;
-    kdfOpsLimit: number;
-    burnOnRead?: boolean;
-}
+import { ACCESS_TOKEN_PATTERN } from "@/lib/pasteLimits";
+import { CorruptPasteError, consumeStoredPaste, type StoredPaste } from "@/lib/pasteStore";
 
 export default async function handler(
     req: NextApiRequest,
@@ -37,75 +32,78 @@ export default async function handler(
     }
 
     const body = (req.body && typeof req.body === "object" ? req.body : {}) as { accessToken?: unknown };
-    const accessToken = typeof body.accessToken === "string" ? body.accessToken : undefined;
-    if (!accessToken) {
+    const accessToken = typeof body.accessToken === "string" ? body.accessToken.trim() : "";
+    if (!ACCESS_TOKEN_PATTERN.test(accessToken)) {
         res.status(400).json({ message: "Invalid paste token" });
         return;
     }
 
-    const tokenStr = accessToken.trim();
+    // A guard problem never touches the paste, so tell the client it may fetch
+    // a fresh guard cookie and retry (e.g. another tab overwrote the cookie).
+    const rejectGuard = (message: string) => {
+        res.setHeader("Set-Cookie", buildClearGuardCookieHeader(req));
+        res.status(410).json({ message, code: GUARD_REJECTED_CODE });
+    };
+
     const guardCookie = req.cookies[GUARD_COOKIE_NAME];
-
     if (!guardCookie) {
-        res.status(410).json({ message: "Paste unavailable (missing guard cookie)" });
+        rejectGuard("Paste unavailable (missing guard cookie)");
         return;
     }
 
-    const isValidGuard = await verifyGuardJWT(
+    const { valid: isValidGuard, jti } = await verifyGuardJWT(
         guardCookie,
-        tokenStr,
-        req.headers["user-agent"],
+        accessToken,
+        req,
     );
-
-    if (!isValidGuard) {
-        res.status(410).json({ message: "Paste unavailable (invalid guard cookie)" });
+    if (!isValidGuard || !jti) {
+        rejectGuard("Paste unavailable (invalid guard cookie)");
         return;
     }
 
-    const redisKey = `${PASTE_KEY_PREFIX}${tokenStr}`;
+    let paste: StoredPaste | null;
+    try {
+        // Each guard cookie may authorize exactly one consume.
+        const jtiAcquired = await redis.set(
+            `${GUARD_JTI_PREFIX}${jti}`,
+            "1",
+            "EX",
+            GUARD_TTL_SECONDS,
+            "NX",
+        );
+        if (jtiAcquired !== "OK") {
+            rejectGuard("Paste unavailable (guard cookie already used)");
+            return;
+        }
 
-    // Peek at payload or getdel depending on burnOnRead status
-    const rawPayload: string | null = await redis.get(redisKey);
+        paste = await consumeStoredPaste(accessToken);
+    } catch (err) {
+        if (err instanceof CorruptPasteError) {
+            res.setHeader("Set-Cookie", buildClearGuardCookieHeader(req));
+            res.status(500).json({ message: "Failed to parse paste payload" });
+            return;
+        }
+        console.error("Failed to consume paste from Redis:", err);
+        res.status(500).json({ message: "Failed to retrieve paste" });
+        return;
+    }
 
-    if (!rawPayload) {
-        // Clear guard cookie if expired or unavailable
-        const clearCookieHeader = `${GUARD_COOKIE_NAME}=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict`;
-        res.setHeader("Set-Cookie", clearCookieHeader);
+    // Always clear the single-use guard cookie after a consume attempt.
+    res.setHeader("Set-Cookie", buildClearGuardCookieHeader(req));
+
+    if (!paste) {
         res.status(410).json({ message: "This paste has expired or was already opened." });
         return;
     }
 
-    let record: StoredPasteRecord;
-    try {
-        record = JSON.parse(rawPayload) as StoredPasteRecord;
-    } catch {
-        res.status(500).json({ message: "Failed to parse paste payload" });
-        return;
-    }
-
-    const burnOnRead = record.burnOnRead !== false; // Default true (Burn-on-Read)
-
-    if (burnOnRead) {
-        // Perform atomic delete via GETDEL (or fallback DEL)
-        try {
-            await redis.del(redisKey);
-        } catch (err) {
-            console.error("Failed to delete burn-on-read paste:", err);
-        }
-
-        // Clear guard cookie for burn-on-read pastes
-        const clearCookieHeader = `${GUARD_COOKIE_NAME}=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict`;
-        res.setHeader("Set-Cookie", clearCookieHeader);
-    }
-
     res.status(200).json({
-        encryptedData: record.encryptedData,
-        decryptionHeader: record.decryptionHeader,
-        encryptedPasteKey: record.encryptedPasteKey,
-        encryptedPasteKeyNonce: record.encryptedPasteKeyNonce,
-        kdfNonce: record.kdfNonce,
-        kdfMemLimit: record.kdfMemLimit,
-        kdfOpsLimit: record.kdfOpsLimit,
+        encryptedData: paste.encryptedData,
+        decryptionHeader: paste.decryptionHeader,
+        encryptedPasteKey: paste.encryptedPasteKey,
+        encryptedPasteKeyNonce: paste.encryptedPasteKeyNonce,
+        kdfNonce: paste.kdfNonce,
+        kdfMemLimit: paste.kdfMemLimit,
+        kdfOpsLimit: paste.kdfOpsLimit,
+        burnOnRead: paste.burnOnRead,
     });
 }
-
