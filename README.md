@@ -54,11 +54,12 @@ sequenceDiagram
     Server-->>Sender: Return access token
     Note over Sender: Assembles link: https://paste.mehro.me/&lt;token&gt;#&lt;key&gt;
 
-    Receiver->>Server: GET /api/paste/guard (Verify human session)
-    Server-->>Receiver: Set anti-bot guard cookie
+    Receiver->>Server: POST /api/paste/guard (Verify human session)
+    Server-->>Receiver: Set single-use guard cookie + return wrapped key envelope
+    Receiver->>Worker: Unwrap paste key with #key (+ password), before anything is burned
     Receiver->>Server: POST /api/paste/consume (Fetch & delete ciphertext)
-    Server-->>Receiver: Return ciphertext (Atomic GETDEL)
-    Receiver->>Worker: Decrypt ciphertext using #key from URL fragment
+    Server-->>Receiver: Return ciphertext (atomic Lua read + delete)
+    Receiver->>Worker: Decrypt ciphertext with the unwrapped key
     Worker-->>Receiver: Display plaintext
 ```
 
@@ -72,10 +73,10 @@ sequenceDiagram
 | Component | Technology | Purpose |
 | :--- | :--- | :--- |
 | **Frontend** | Next.js (Pages Router) + React 19 + TypeScript | Interface, form handling, and QR generation |
-| **Styling** | Material-UI (MUI v6) + Custom Theme Engine | Dark-mode design system |
+| **Styling** | Material-UI (MUI) + Custom Theme Engine | Dark-mode design system |
 | **Cryptography** | `libsodium-wrappers-sumo` via Comlink Web Workers | Non-blocking cryptographic operations |
 | **Key Derivation** | Argon2id (`crypto_pwhash_ALG_ARGON2ID13`) | Passphrase strengthening against brute-force attacks |
-| **Storage Engine** | Redis (`ioredis`) | High-performance key-value cache with native TTL |
+| **Storage Engine** | Redis (`ioredis`) + Lua scripts | Atomic burn-on-read and native TTL expiry |
 | **Guard System** | `jose` (JWT) | Cryptographic cookies preventing link preview crawlers |
 
 ---
@@ -84,9 +85,9 @@ sequenceDiagram
 
 ### Prerequisites
 
-- **Node.js**: Version `20.x` or higher
+- **Node.js**: Version `22.12` or higher (required by the test runner)
 - **npm**: Version `9.x` or higher
-- **Redis**: Local instance or managed provider (e.g., Upstash, Redis Cloud, DragonFly)
+- **Redis**: Local instance or managed provider with Lua scripting (`EVAL`) support (e.g., Upstash, Redis Cloud, DragonFly)
 
 ### Installation
 
@@ -127,6 +128,11 @@ Open [http://localhost:3008](http://localhost:3008) in your browser.
 Run tests, typechecks, and linting across the monorepo:
 
 ```bash
+# Unit + integration tests (Vitest). Redis-backed tests start a throwaway
+# `redis-server` on a random port; they are skipped if it isn't installed.
+# To use a dedicated, flushable instance instead: TEST_REDIS_URL=redis://host:port
+npm test
+
 # Type check all TypeScript files
 npm run typecheck
 
@@ -158,8 +164,9 @@ Build and start the application in any Node.js environment:
 
 ```bash
 cd web
-npm install --omit=dev
+npm ci                  # the build needs devDependencies (TypeScript, type packages)
 npm run build
+npm prune --omit=dev    # optional: drop build-only packages afterwards
 npm start
 ```
 
